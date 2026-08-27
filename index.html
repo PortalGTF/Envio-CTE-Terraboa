@@ -250,6 +250,20 @@
   .cte-pill.pending{background:var(--pending-bg);color:var(--text-faint);border:1px solid var(--border);}
   .cte-pill.done{background:var(--ok-bg);color:var(--ok);border:1px solid rgba(73,184,136,0.35);}
 
+  .send-email-btn{
+    background:var(--accent);color:#1A1300;border:none;border-radius:6px;
+    padding:10px 16px;font-family:'Inter',sans-serif;font-weight:600;font-size:13px;
+    cursor:pointer;transition:filter .12s ease;margin-bottom:6px;
+  }
+  .send-email-btn:hover{filter:brightness(1.08);}
+  .send-email-btn:disabled{opacity:.6;cursor:default;}
+  .send-email-btn.sent{background:var(--ok-bg);color:var(--ok);border:1px solid rgba(73,184,136,0.4);}
+  .send-email-btn.sent:hover{filter:none;}
+  .email-sent-dot{
+    display:inline-block;width:7px;height:7px;border-radius:50%;
+    background:var(--ok);margin-left:6px;vertical-align:middle;
+  }
+
   /* ---------- expanded panel ---------- */
   .detail-panel{
     max-height:0;overflow:hidden;
@@ -437,6 +451,79 @@ const dateFmt = (iso) => {
   const [y,m,d] = iso.split('-');
   return `${d}/${m}/${y.slice(2)}`;
 };
+const dateFmtFull = (iso) => {
+  if(!iso) return '—';
+  const [y,m,d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+};
+
+function saudacaoAtual(){
+  const h = new Date().getHours();
+  if(h < 12) return 'Bom dia';
+  if(h < 18) return 'Boa tarde';
+  return 'Boa noite';
+}
+
+function montarAssunto(r){
+  return `EMISSÃO CTE - CARGA: ${r.romaneio} - TRANSPORTADORA: ${r.transportadora} - DATA: ${dateFmtFull(r.dataEmissao)}`;
+}
+
+function fmtDataHora(iso){
+  if(!iso) return '';
+  try{
+    return new Date(iso).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+  }catch(e){ return ''; }
+}
+
+async function enviarEmail(key){
+  const r = DATA.find(x => rowKey(x) === key);
+  if(!r) return;
+
+  if(!SCRIPT_URL){
+    alert('Configure o SCRIPT_URL no código antes de enviar e-mails (veja o topo do arquivo).');
+    return;
+  }
+
+  if(r.emailEnviado){
+    const ok = confirm(`Este romaneio já foi enviado por e-mail em ${fmtDataHora(r.dataEnvioEmail)}.\n\nEnviar de novo mesmo assim?`);
+    if(!ok) return;
+  } else {
+    const ok = confirm(`Enviar e-mail de emissão de CTe para a transportadora ${r.transportadora} (romaneio ${r.romaneio})?\n\nLembre-se de anexar as notas/canhotos no e-mail depois, essa plataforma não tem acesso aos arquivos.`);
+    if(!ok) return;
+  }
+
+  const btn = document.querySelector(`[data-send-btn="${CSS.escape(key)}"]`);
+  if(btn){ btn.disabled = true; btn.textContent = 'Enviando…'; }
+
+  try{
+    const res = await fetch(SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'enviarEmail',
+        filial: r.filial,
+        romaneio: r.romaneio,
+        cdTransp: r.cdTransp,
+        subject: montarAssunto(r),
+        greeting: saudacaoAtual()
+      })
+    });
+    const json = await res.json();
+    if(json.success){
+      r.emailEnviado = true;
+      r.dataEnvioEmail = new Date().toISOString();
+      render();
+      requestAnimationFrame(()=>{
+        if(!openSet.has(key)) toggleRow(key);
+      });
+    } else {
+      alert('Não consegui enviar o e-mail:\n' + json.error);
+      render();
+    }
+  }catch(err){
+    alert('Erro de conexão ao tentar enviar o e-mail:\n' + err.message);
+    render();
+  }
+}
 
 let state = { search:'', filial:'', transp:'', onlyOcc:false, onlyPending:false, hideGoncalves:false };
 
@@ -545,8 +632,16 @@ function renderDetail(r){
     </div>
   `).join('') : `<div class="no-occ">Nenhuma ocorrência 025 (complemento/diária) neste romaneio.</div>`;
 
+  const key = rowKey(r);
+  const sendBtnHtml = r.emailEnviado
+    ? `<button class="send-email-btn sent" data-send-btn="${key}" onclick="enviarEmail('${key}')">✓ E-mail enviado em ${fmtDataHora(r.dataEnvioEmail)} · reenviar</button>`
+    : `<button class="send-email-btn" data-send-btn="${key}" onclick="enviarEmail('${key}')">Enviar e-mail ao transportador</button>`;
+
   return `
     <div class="detail-inner">
+      <div class="panel-block" style="flex-basis:100%;order:-1;padding-bottom:2px;">
+        ${sendBtnHtml}
+      </div>
       <div class="panel-block">
         <div class="panel-title">Notas fiscais <span class="n">(${r.nfs.length})</span></div>
         <table class="nf-table">
@@ -596,7 +691,7 @@ function render(){
         <div class="num">${currFmt(r.frete)}</div>
         <div class="num">${currFmt(r.valorCarga)}</div>
         <div class="num">${occCount>0 ? `<span class="occ-badge">${occCount}</span>` : `<span class="occ-none">—</span>`}</div>
-        <div>${ctePendente ? `<span class="cte-pill pending">pendente</span>` : `<span class="cte-pill done">${escapeHtml(r.cte)}</span>`}</div>
+        <div>${ctePendente ? `<span class="cte-pill pending">pendente</span>` : `<span class="cte-pill done">${escapeHtml(r.cte)}</span>`}${r.emailEnviado ? `<span class="email-sent-dot" title="E-mail já enviado em ${fmtDataHora(r.dataEnvioEmail)}"></span>` : ''}</div>
         <div class="toggle-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
       </div>
       <div class="detail-panel" style="${isOpen ? 'max-height:2000px;' : ''}">

@@ -33,14 +33,11 @@
  */
 
 const ABA_DADOS = "Dados";
+const ABA_EMAILS = "Emails_Transportadoras";
+const ABA_ENVIOS = "Envios";
 
-function doGet(e) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const aba = ss.getSheetByName(ABA_DADOS);
-  const dados = aba.getDataRange().getValues();
-  const cab = dados[0];
-
-  const idx = {
+function getIdx(cab) {
+  return {
     filial: cab.indexOf("FILIAL"),
     dtEmissao: cab.indexOf("DT_EMISSAO_NF"),
     romaneio: cab.indexOf("NR_ROMANEIO"),
@@ -65,6 +62,14 @@ function doGet(e) {
     motOcor: cab.indexOf("MOT_OCOR"),
     cte: cab.indexOf("CTE")
   };
+}
+
+function doGet(e) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const aba = ss.getSheetByName(ABA_DADOS);
+  const dados = aba.getDataRange().getValues();
+  const cab = dados[0];
+  const idx = getIdx(cab);
 
   const romaneios = {};
   const ordem = [];
@@ -130,9 +135,189 @@ function doGet(e) {
 
   const resultado = ordem.map(k => romaneios[k]);
 
+  // Marca quais romaneios já tiveram e-mail enviado (aba "Envios")
+  const envios = lerEnvios(ss);
+  resultado.forEach(function (r) {
+    const chave = r.filial + "|" + r.romaneio + "|" + r.cdTransp;
+    const info = envios[chave];
+    r.emailEnviado = !!info;
+    r.dataEnvioEmail = info ? info.data : null;
+  });
+
   return ContentService
     .createTextOutput(JSON.stringify(resultado))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+function lerEnvios(ss) {
+  const aba = ss.getSheetByName(ABA_ENVIOS);
+  const mapa = {};
+  if (!aba) return mapa;
+  const valores = aba.getDataRange().getValues();
+  for (let i = 1; i < valores.length; i++) {
+    const chave = valores[i][0];
+    const data = valores[i][4];
+    if (!chave) continue;
+    mapa[chave] = {
+      data: data instanceof Date ? data.toISOString() : String(data || "")
+    };
+  }
+  return mapa;
+}
+
+/**
+ * Recebe requisições POST da página (botão "Enviar e-mail").
+ * Corpo esperado (JSON): { action: "enviarEmail", filial, romaneio, cdTransp, subject, greeting }
+ */
+function doPost(e) {
+  let payload;
+  try {
+    payload = JSON.parse(e.postData.contents);
+  } catch (err) {
+    return jsonResponse({ success: false, error: "Requisição inválida." });
+  }
+
+  if (payload.action === "enviarEmail") {
+    return enviarEmailRomaneio(payload);
+  }
+
+  return jsonResponse({ success: false, error: "Ação desconhecida: " + payload.action });
+}
+
+function jsonResponse(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function enviarEmailRomaneio(payload) {
+  const filial = String(payload.filial || "");
+  const romaneio = String(payload.romaneio || "");
+  const cdTransp = String(payload.cdTransp || "");
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 1) E-mail da transportadora
+  const abaEmails = ss.getSheetByName(ABA_EMAILS);
+  if (!abaEmails) return jsonResponse({ success: false, error: 'Aba "Emails_Transportadoras" não encontrada na planilha.' });
+
+  const emailsValores = abaEmails.getDataRange().getValues();
+  const emailsCab = emailsValores[0];
+  const idxCd = emailsCab.indexOf("CD_TRANSP");
+  const idxDest = emailsCab.findIndex(h => String(h).indexOf("EMAIL_DESTINATARIO") === 0);
+  const idxCc = emailsCab.findIndex(h => String(h).indexOf("EMAIL_CC_GTF") === 0);
+
+  let destinatario = "", cc = "";
+  for (let i = 1; i < emailsValores.length; i++) {
+    if (String(emailsValores[i][idxCd]) === cdTransp) {
+      destinatario = limpar(emailsValores[i][idxDest]);
+      cc = limpar(emailsValores[i][idxCc]);
+      break;
+    }
+  }
+  if (!destinatario) {
+    return jsonResponse({ success: false, error: "Essa transportadora ainda não tem e-mail cadastrado na aba Emails_Transportadoras (código " + cdTransp + ")." });
+  }
+
+  // 2) Linhas do romaneio na aba Dados (fonte da verdade, não confia no que veio do navegador)
+  const abaDados = ss.getSheetByName(ABA_DADOS);
+  const dados = abaDados.getDataRange().getValues();
+  const cab = dados[0];
+  const idx = getIdx(cab);
+
+  const linhas = [];
+  for (let i = 1; i < dados.length; i++) {
+    const r = dados[i];
+    if (String(r[idx.filial]) === filial && String(r[idx.romaneio]) === romaneio && String(r[idx.cdTransp]) === cdTransp) {
+      linhas.push(r);
+    }
+  }
+  if (linhas.length === 0) {
+    return jsonResponse({ success: false, error: "Não encontrei esse romaneio na aba Dados." });
+  }
+
+  // 3) Montar tabela igual ao layout do relatório (copiável, não é imagem)
+  const primeira = linhas[0];
+  const dt = primeira[idx.dtEmissao];
+  const dtStr = dt instanceof Date ? Utilities.formatDate(dt, Session.getScriptTimeZone(), "dd/MM/yyyy") : String(dt || "");
+  const transportadora = limpar(primeira[idx.dsTransp]);
+  const motorista = limpar(primeira[idx.motorista]);
+  const placa = limpar(primeira[idx.placa]);
+  const peso = parseNumeroBR(primeira[idx.peso]);
+  const frete = parseNumeroBR(primeira[idx.vlrFrete]);
+  const valorCarga = parseNumeroBR(primeira[idx.valorNf]);
+
+  const fmtMoeda = v => v == null ? "" : "R$ " + v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtNum = v => v == null ? "" : v.toLocaleString("pt-BR");
+
+  let linhasHtml = "";
+  linhas.forEach(function (r, i) {
+    const nrNf = limpar(r[idx.nrNf]);
+    const chave = limpar(r[idx.chave]);
+    if (i === 0) {
+      linhasHtml += "<tr>"
+        + "<td>" + dtStr + "</td>"
+        + "<td>" + romaneio + "</td>"
+        + "<td>" + transportadora + "</td>"
+        + "<td>" + motorista + "</td>"
+        + "<td>" + placa + "</td>"
+        + "<td>" + fmtNum(peso) + "</td>"
+        + "<td>" + fmtMoeda(frete) + "</td>"
+        + "<td>" + fmtMoeda(valorCarga) + "</td>"
+        + "<td>" + nrNf + "</td>"
+        + "<td style='font-size:11px'>" + chave + "</td>"
+        + "</tr>";
+    } else {
+      linhasHtml += "<tr>"
+        + "<td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>"
+        + "<td>" + nrNf + "</td>"
+        + "<td style='font-size:11px'>" + chave + "</td>"
+        + "</tr>";
+    }
+  });
+
+  const tabela =
+    "<table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px;width:100%;margin-top:12px'>"
+    + "<tr style='background:#4472C4;color:#ffffff'>"
+    + "<th>DT_EMISSAO_NF</th><th>NR_ROMANEIO</th><th>DS_TRANSP</th><th>DS_MOTORISTA</th><th>PLACA</th>"
+    + "<th>PESO</th><th>VLR_FRETE</th><th>VALOR_NF</th><th>NR_NF</th><th>CHAVENF</th>"
+    + "</tr>"
+    + linhasHtml
+    + "</table>";
+
+  const saudacao = payload.greeting || "Bom dia";
+  const corpo =
+    "<div style='font-family:Arial,sans-serif;font-size:13px;color:#1a1a1a;line-height:1.5'>"
+    + "<p>" + saudacao + " a todos, Favor enviar o cte nesse mesmo e-mail, não tire ninguém da cópia</p>"
+    + "<p><b>OBS:- FAVOR SEMPRE CONFERIR SE AS NOTAS ANEXA ESTÃO CONFERINDO COM O RELATÓRIO ABAIXO</b></p>"
+    + "<p>Segue anexo as notas e abaixo a formação para emissão do cte, lembrando que após a emissão devem enviar nesse mesmo e-mail cte para lançamento e posterior pagamento.</p>"
+    + "<p>Comprovantes de despesas enviar anexo no e-mail junto com o cte</p>"
+    + tabela
+    + "</div>";
+
+  const assunto = payload.subject ||
+    ("EMISSÃO CTE - CARGA: " + romaneio + " - TRANSPORTADORA: " + transportadora + " - DATA: " + dtStr);
+
+  try {
+    GmailApp.sendEmail(destinatario, assunto, "", {
+      htmlBody: corpo,
+      cc: cc || undefined,
+      name: "Envio de Cargas - Criação de CTe"
+    });
+  } catch (err) {
+    return jsonResponse({ success: false, error: "Erro ao enviar pelo Gmail: " + err });
+  }
+
+  marcarEnviado(ss, filial, romaneio, cdTransp, destinatario, cc);
+
+  return jsonResponse({ success: true, destinatario: destinatario, cc: cc });
+}
+
+function marcarEnviado(ss, filial, romaneio, cdTransp, destinatario, cc) {
+  let aba = ss.getSheetByName(ABA_ENVIOS);
+  if (!aba) {
+    aba = ss.insertSheet(ABA_ENVIOS);
+    aba.appendRow(["CHAVE", "FILIAL", "ROMANEIO", "CD_TRANSP", "DATA_ENVIO", "DESTINATARIO", "CC"]);
+  }
+  const chave = filial + "|" + romaneio + "|" + cdTransp;
+  aba.appendRow([chave, filial, romaneio, cdTransp, new Date(), destinatario, cc]);
 }
 
 function limpar(v) {
