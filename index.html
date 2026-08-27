@@ -475,25 +475,60 @@ function fmtDataHora(iso){
   }catch(e){ return ''; }
 }
 
+async function copiarParaAreaTransferencia(html, texto){
+  try{
+    if(navigator.clipboard && window.ClipboardItem){
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], {type:'text/html'}),
+          'text/plain': new Blob([texto], {type:'text/plain'})
+        })
+      ]);
+      return true;
+    }
+  }catch(err){
+    console.warn('Clipboard rica falhou, tentando texto simples:', err);
+  }
+  try{
+    await navigator.clipboard.writeText(texto);
+    return true;
+  }catch(err){
+    console.warn('Clipboard simples também falhou:', err);
+  }
+  try{
+    const ta = document.createElement('textarea');
+    ta.value = texto;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  }catch(err){
+    return false;
+  }
+}
+
 async function enviarEmail(key){
   const r = DATA.find(x => rowKey(x) === key);
   if(!r) return;
 
   if(!SCRIPT_URL){
-    alert('Configure o SCRIPT_URL no código antes de enviar e-mails (veja o topo do arquivo).');
+    alert('Configure o SCRIPT_URL no código antes de preparar e-mails (veja o topo do arquivo).');
     return;
   }
 
   if(r.emailEnviado){
-    const ok = confirm(`Este romaneio já foi enviado por e-mail em ${fmtDataHora(r.dataEnvioEmail)}.\n\nEnviar de novo mesmo assim?`);
+    const ok = confirm(`Este romaneio já teve o e-mail preparado em ${fmtDataHora(r.dataEnvioEmail)}.\n\nPreparar de novo mesmo assim?`);
     if(!ok) return;
   } else {
-    const ok = confirm(`Enviar e-mail de emissão de CTe para a transportadora ${r.transportadora} (romaneio ${r.romaneio})?\n\nLembre-se de anexar as notas/canhotos no e-mail depois, essa plataforma não tem acesso aos arquivos.`);
+    const ok = confirm(`Preparar e-mail de emissão de CTe para a transportadora ${r.transportadora} (romaneio ${r.romaneio})?\n\nVai abrir o Outlook do seu computador com destinatário e assunto prontos, e o corpo do e-mail copiado pra você colar (Ctrl+V). Depois é só anexar as notas/canhotos e enviar.`);
     if(!ok) return;
   }
 
   const btn = document.querySelector(`[data-send-btn="${CSS.escape(key)}"]`);
-  if(btn){ btn.disabled = true; btn.textContent = 'Enviando…'; }
+  if(btn){ btn.disabled = true; btn.textContent = 'Preparando…'; }
 
   try{
     const res = await fetch(SCRIPT_URL, {
@@ -509,18 +544,32 @@ async function enviarEmail(key){
     });
     const json = await res.json();
     if(json.success){
+      const copiou = await copiarParaAreaTransferencia(json.htmlBody, json.plainBody);
+
+      const params = new URLSearchParams();
+      params.set('subject', json.subject);
+      if(json.cc) params.set('cc', json.cc);
+      const mailto = `mailto:${encodeURIComponent(json.destinatario)}?${params.toString()}`;
+      window.location.href = mailto;
+
       r.emailEnviado = true;
       r.dataEnvioEmail = new Date().toISOString();
       render();
       requestAnimationFrame(()=>{
         if(!openSet.has(key)) toggleRow(key);
       });
+
+      setTimeout(()=>{
+        alert(copiou
+          ? 'Outlook aberto com destinatário e assunto prontos.\n\nO corpo do e-mail já foi copiado — clique dentro do corpo do e-mail e cole com Ctrl+V. Depois é só anexar as notas e enviar.'
+          : 'Outlook aberto, mas não consegui copiar o corpo automaticamente (permissão do navegador). Copie manualmente os dados do romaneio antes de enviar.');
+      }, 400);
     } else {
-      alert('Não consegui enviar o e-mail:\n' + json.error);
+      alert('Não consegui preparar o e-mail:\n' + json.error);
       render();
     }
   }catch(err){
-    alert('Erro de conexão ao tentar enviar o e-mail:\n' + err.message);
+    alert('Erro de conexão ao tentar preparar o e-mail:\n' + err.message);
     render();
   }
 }
@@ -634,8 +683,8 @@ function renderDetail(r){
 
   const key = rowKey(r);
   const sendBtnHtml = r.emailEnviado
-    ? `<button class="send-email-btn sent" data-send-btn="${key}" onclick="enviarEmail('${key}')">✓ E-mail enviado em ${fmtDataHora(r.dataEnvioEmail)} · reenviar</button>`
-    : `<button class="send-email-btn" data-send-btn="${key}" onclick="enviarEmail('${key}')">Enviar e-mail ao transportador</button>`;
+    ? `<button class="send-email-btn sent" data-send-btn="${key}" onclick="enviarEmail('${key}')">✓ E-mail preparado em ${fmtDataHora(r.dataEnvioEmail)} · preparar de novo</button>`
+    : `<button class="send-email-btn" data-send-btn="${key}" onclick="enviarEmail('${key}')">Preparar e-mail no Outlook</button>`;
 
   return `
     <div class="detail-inner">
@@ -691,7 +740,7 @@ function render(){
         <div class="num">${currFmt(r.frete)}</div>
         <div class="num">${currFmt(r.valorCarga)}</div>
         <div class="num">${occCount>0 ? `<span class="occ-badge">${occCount}</span>` : `<span class="occ-none">—</span>`}</div>
-        <div>${ctePendente ? `<span class="cte-pill pending">pendente</span>` : `<span class="cte-pill done">${escapeHtml(r.cte)}</span>`}${r.emailEnviado ? `<span class="email-sent-dot" title="E-mail já enviado em ${fmtDataHora(r.dataEnvioEmail)}"></span>` : ''}</div>
+        <div>${ctePendente ? `<span class="cte-pill pending">pendente</span>` : `<span class="cte-pill done">${escapeHtml(r.cte)}</span>`}${r.emailEnviado ? `<span class="email-sent-dot" title="E-mail preparado em ${fmtDataHora(r.dataEnvioEmail)}"></span>` : ''}</div>
         <div class="toggle-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
       </div>
       <div class="detail-panel" style="${isOpen ? 'max-height:2000px;' : ''}">

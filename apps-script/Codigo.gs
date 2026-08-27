@@ -206,7 +206,7 @@ function enviarEmailRomaneio(payload) {
 
   let destinatario = "", cc = "";
   for (let i = 1; i < emailsValores.length; i++) {
-    if (String(emailsValores[i][idxCd]) === cdTransp) {
+    if (normalizarCodigo(emailsValores[i][idxCd]) === normalizarCodigo(cdTransp)) {
       destinatario = limpar(emailsValores[i][idxDest]);
       cc = limpar(emailsValores[i][idxCc]);
       break;
@@ -283,8 +283,8 @@ function enviarEmailRomaneio(payload) {
     + "</table>";
 
   const saudacao = payload.greeting || "Bom dia";
-  const corpo =
-    "<div style='font-family:Arial,sans-serif;font-size:13px;color:#1a1a1a;line-height:1.5'>"
+  const corpoHtml =
+    "<div style=\"font-family:Arial,sans-serif;font-size:13px;color:#1a1a1a;line-height:1.5\">"
     + "<p>" + saudacao + " a todos, Favor enviar o cte nesse mesmo e-mail, não tire ninguém da cópia</p>"
     + "<p><b>OBS:- FAVOR SEMPRE CONFERIR SE AS NOTAS ANEXA ESTÃO CONFERINDO COM O RELATÓRIO ABAIXO</b></p>"
     + "<p>Segue anexo as notas e abaixo a formação para emissão do cte, lembrando que após a emissão devem enviar nesse mesmo e-mail cte para lançamento e posterior pagamento.</p>"
@@ -292,29 +292,43 @@ function enviarEmailRomaneio(payload) {
     + tabela
     + "</div>";
 
+  let corpoTexto =
+    saudacao + " a todos, Favor enviar o cte nesse mesmo e-mail, não tire ninguém da cópia\n\n"
+    + "OBS:- FAVOR SEMPRE CONFERIR SE AS NOTAS ANEXA ESTÃO CONFERINDO COM O RELATÓRIO ABAIXO\n\n"
+    + "Segue anexo as notas e abaixo a formação para emissão do cte, lembrando que após a emissão devem enviar nesse mesmo e-mail cte para lançamento e posterior pagamento.\n\n"
+    + "Comprovantes de despesas enviar anexo no e-mail junto com o cte\n\n"
+    + "DT_EMISSAO_NF\tNR_ROMANEIO\tDS_TRANSP\tDS_MOTORISTA\tPLACA\tPESO\tVLR_FRETE\tVALOR_NF\tNR_NF\tCHAVENF\n";
+
+  linhas.forEach(function (r, i) {
+    const nrNf = limpar(r[idx.nrNf]);
+    const chave = limpar(r[idx.chave]);
+    if (i === 0) {
+      corpoTexto += [dtStr, romaneio, transportadora, motorista, placa, fmtNum(peso), fmtMoeda(frete), fmtMoeda(valorCarga), nrNf, chave].join("\t") + "\n";
+    } else {
+      corpoTexto += ["", "", "", "", "", "", "", "", nrNf, chave].join("\t") + "\n";
+    }
+  });
+
   const assunto = payload.subject ||
     ("EMISSÃO CTE - CARGA: " + romaneio + " - TRANSPORTADORA: " + transportadora + " - DATA: " + dtStr);
 
-  try {
-    GmailApp.sendEmail(destinatario, assunto, "", {
-      htmlBody: corpo,
-      cc: cc || undefined,
-      name: "Envio de Cargas - Criação de CTe"
-    });
-  } catch (err) {
-    return jsonResponse({ success: false, error: "Erro ao enviar pelo Gmail: " + err });
-  }
+  marcarPreparado(ss, filial, romaneio, cdTransp, destinatario, cc);
 
-  marcarEnviado(ss, filial, romaneio, cdTransp, destinatario, cc);
-
-  return jsonResponse({ success: true, destinatario: destinatario, cc: cc });
+  return jsonResponse({
+    success: true,
+    destinatario: destinatario,
+    cc: cc,
+    subject: assunto,
+    htmlBody: corpoHtml,
+    plainBody: corpoTexto
+  });
 }
 
-function marcarEnviado(ss, filial, romaneio, cdTransp, destinatario, cc) {
+function marcarPreparado(ss, filial, romaneio, cdTransp, destinatario, cc) {
   let aba = ss.getSheetByName(ABA_ENVIOS);
   if (!aba) {
     aba = ss.insertSheet(ABA_ENVIOS);
-    aba.appendRow(["CHAVE", "FILIAL", "ROMANEIO", "CD_TRANSP", "DATA_ENVIO", "DESTINATARIO", "CC"]);
+    aba.appendRow(["CHAVE", "FILIAL", "ROMANEIO", "CD_TRANSP", "DATA_PREPARO", "DESTINATARIO", "CC"]);
   }
   const chave = filial + "|" + romaneio + "|" + cdTransp;
   aba.appendRow([chave, filial, romaneio, cdTransp, new Date(), destinatario, cc]);
@@ -323,6 +337,15 @@ function marcarEnviado(ss, filial, romaneio, cdTransp, destinatario, cc) {
 function limpar(v) {
   if (v === null || v === undefined) return "";
   return String(v).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Normaliza códigos de transportadora pra comparação - remove zeros à
+ * esquerda, já que a mesma transportadora pode vir como "2073" na aba
+ * Dados e "002073" na aba Emails_Transportadoras.
+ */
+function normalizarCodigo(v) {
+  return String(v == null ? "" : v).trim().replace(/^0+(?=\d)/, "");
 }
 
 /**
