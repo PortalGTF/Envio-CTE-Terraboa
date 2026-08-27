@@ -282,6 +282,27 @@ function enviarEmailRomaneio(payload) {
     + linhasHtml
     + "</table>";
 
+  // Ocorrências 025 (complemento de frete / diária) desse romaneio - aparecem
+  // acima da tabela, uma linha por ocorrência: "Ocorrência: 000 - descrição VALOR: X,XX"
+  const linhasOcorrenciaHtml = [];
+  const linhasOcorrenciaTexto = [];
+  linhas.forEach(function (r) {
+    const descrSub = limpar(r[idx.descrSubOc]);
+    const mot = limpar(r[idx.motOcor]);
+    if (descrSub.indexOf("025") === 0 || mot.indexOf("025") === 0) {
+      const nrOc = limpar(r[idx.nrOcorrencia]);
+      const desc = limpar(r[idx.ocorrencia]);
+      const valorOc = parseNumeroBR(r[idx.ocComplemento]);
+      let linha = "Ocorrência: " + nrOc;
+      if (desc) linha += " - " + desc;
+      if (valorOc != null) linha += " VALOR: " + valorOc.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      linhasOcorrenciaHtml.push("<p style='margin:2px 0'>" + linha + "</p>");
+      linhasOcorrenciaTexto.push(linha);
+    }
+  });
+  const ocorrenciasHtml = linhasOcorrenciaHtml.join("");
+  const ocorrenciasTexto = linhasOcorrenciaTexto.length ? linhasOcorrenciaTexto.join("\n") + "\n\n" : "";
+
   const saudacao = payload.greeting || "Bom dia";
   const corpoHtml =
     "<div style=\"font-family:Arial,sans-serif;font-size:13px;color:#1a1a1a;line-height:1.5\">"
@@ -289,6 +310,7 @@ function enviarEmailRomaneio(payload) {
     + "<p><b>OBS:- FAVOR SEMPRE CONFERIR SE AS NOTAS ANEXA ESTÃO CONFERINDO COM O RELATÓRIO ABAIXO</b></p>"
     + "<p>Segue anexo as notas e abaixo a formação para emissão do cte, lembrando que após a emissão devem enviar nesse mesmo e-mail cte para lançamento e posterior pagamento.</p>"
     + "<p>Comprovantes de despesas enviar anexo no e-mail junto com o cte</p>"
+    + ocorrenciasHtml
     + tabela
     + "</div>";
 
@@ -297,6 +319,7 @@ function enviarEmailRomaneio(payload) {
     + "OBS:- FAVOR SEMPRE CONFERIR SE AS NOTAS ANEXA ESTÃO CONFERINDO COM O RELATÓRIO ABAIXO\n\n"
     + "Segue anexo as notas e abaixo a formação para emissão do cte, lembrando que após a emissão devem enviar nesse mesmo e-mail cte para lançamento e posterior pagamento.\n\n"
     + "Comprovantes de despesas enviar anexo no e-mail junto com o cte\n\n"
+    + ocorrenciasTexto
     + "DT_EMISSAO_NF\tNR_ROMANEIO\tDS_TRANSP\tDS_MOTORISTA\tPLACA\tPESO\tVLR_FRETE\tVALOR_NF\tNR_NF\tCHAVENF\n";
 
   linhas.forEach(function (r, i) {
