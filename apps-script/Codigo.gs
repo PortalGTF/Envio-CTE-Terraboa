@@ -84,10 +84,10 @@ function doGet(e) {
         transportadora: limpar(r[idx.dsTransp]),
         motorista: limpar(r[idx.motorista]),
         placa: limpar(r[idx.placa]),
-        peso: r[idx.peso],
-        tarifa: r[idx.tarifa],
-        frete: r[idx.vlrFrete],
-        valorCarga: r[idx.valorNf],
+        peso: parseNumeroBR(r[idx.peso]),
+        tarifa: parseNumeroBR(r[idx.tarifa]),
+        frete: parseNumeroBR(r[idx.vlrFrete]),
+        valorCarga: parseNumeroBR(r[idx.valorNf]),
         dataEmissao: dt instanceof Date ? Utilities.formatDate(dt, Session.getScriptTimeZone(), "yyyy-MM-dd") : String(dt || ""),
         cte: limpar(r[idx.cte]),
         nfs: [],
@@ -122,7 +122,7 @@ function doGet(e) {
         nrOcorrencia: limpar(r[idx.nrOcorrencia]),
         dataOc: dataOc instanceof Date ? Utilities.formatDate(dataOc, Session.getScriptTimeZone(), "yyyy-MM-dd") : String(dataOc || ""),
         tipos: tipos,
-        valor: typeof r[idx.ocComplemento] === "number" ? r[idx.ocComplemento] : null,
+        valor: parseNumeroBR(r[idx.ocComplemento]),
         descricao: (typeof desc === "string" && desc.trim() !== "" && desc.trim() !== "-") ? limpar(desc) : null
       });
     }
@@ -138,4 +138,22 @@ function doGet(e) {
 function limpar(v) {
   if (v === null || v === undefined) return "";
   return String(v).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Converte valores numéricos que podem vir como número puro OU como texto
+ * formatado (ex: "R$ 168.337,38", "7.448,00", "5117") - comum quando a
+ * coluna da planilha está formatada como moeda/texto em vez de número.
+ */
+function parseNumeroBR(v) {
+  if (typeof v === "number") return v;
+  if (v === null || v === undefined) return null;
+  var s = String(v).trim();
+  if (s === "" || s === "-") return null;
+  s = s.replace(/R\$/gi, "").replace(/\s/g, "");
+  if (s.indexOf(",") > -1) {
+    s = s.replace(/\./g, "").replace(",", ".");
+  }
+  var n = parseFloat(s);
+  return isNaN(n) ? null : n;
 }
