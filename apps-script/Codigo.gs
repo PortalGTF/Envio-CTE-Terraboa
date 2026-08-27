@@ -36,6 +36,20 @@ const ABA_DADOS = "Dados";
 const ABA_EMAILS = "Emails_Transportadoras";
 const ABA_ENVIOS = "Envios";
 
+/**
+ * Preenche com zero à esquerda até o tamanho padrão do campo, porque a
+ * planilha guarda esses códigos como número puro e perde os zeros
+ * (ex: FILIAL "01026" vira 1026, NR_ROMANEIO "08111701" vira 8111701).
+ * Se o valor já tiver esse tamanho ou mais, não mexe nele.
+ */
+function zpad(v, largura) {
+  return String(v == null ? "" : v).trim().padStart(largura, "0");
+}
+const LARGURA_FILIAL = 5;
+const LARGURA_ROMANEIO = 8;
+const LARGURA_NF = 9;
+const LARGURA_TRANSP = 6;
+
 function getIdx(cab) {
   return {
     filial: cab.indexOf("FILIAL"),
@@ -78,14 +92,19 @@ function doGet(e) {
     const r = dados[i];
     if (!r[idx.filial]) continue;
 
-    const key = r[idx.filial] + "|" + r[idx.romaneio] + "|" + r[idx.cdTransp];
+    const filialPad = zpad(r[idx.filial], LARGURA_FILIAL);
+    const romaneioPad = zpad(r[idx.romaneio], LARGURA_ROMANEIO);
+    const cdTranspPad = zpad(r[idx.cdTransp], LARGURA_TRANSP);
+    const nrNfPad = zpad(r[idx.nrNf], LARGURA_NF);
+
+    const key = filialPad + "|" + romaneioPad + "|" + cdTranspPad;
 
     if (!romaneios[key]) {
       const dt = r[idx.dtEmissao];
       romaneios[key] = {
-        filial: String(r[idx.filial]),
-        romaneio: String(r[idx.romaneio]),
-        cdTransp: String(r[idx.cdTransp]),
+        filial: filialPad,
+        romaneio: romaneioPad,
+        cdTransp: cdTranspPad,
         transportadora: limpar(r[idx.dsTransp]),
         motorista: limpar(r[idx.motorista]),
         placa: limpar(r[idx.placa]),
@@ -107,7 +126,7 @@ function doGet(e) {
     if (rom.cidades.indexOf(cidadeUf) === -1) rom.cidades.push(cidadeUf);
 
     rom.nfs.push({
-      nrNf: String(r[idx.nrNf]),
+      nrNf: nrNfPad,
       loja: limpar(r[idx.loja]),
       cidade: limpar(r[idx.cidade]),
       uf: limpar(r[idx.uf]),
@@ -123,7 +142,7 @@ function doGet(e) {
       const dataOc = r[idx.dataOc];
       const desc = r[idx.ocorrencia];
       rom.ocorrencias025.push({
-        nrNf: String(r[idx.nrNf]),
+        nrNf: nrNfPad,
         nrOcorrencia: limpar(r[idx.nrOcorrencia]),
         dataOc: dataOc instanceof Date ? Utilities.formatDate(dataOc, Session.getScriptTimeZone(), "yyyy-MM-dd") : String(dataOc || ""),
         tipos: tipos,
@@ -248,7 +267,7 @@ function enviarEmailRomaneio(payload) {
   const linhas = [];
   for (let i = 1; i < dados.length; i++) {
     const r = dados[i];
-    if (String(r[idx.filial]) === filial && String(r[idx.romaneio]) === romaneio && String(r[idx.cdTransp]) === cdTransp) {
+    if (zpad(r[idx.filial], LARGURA_FILIAL) === filial && zpad(r[idx.romaneio], LARGURA_ROMANEIO) === romaneio && zpad(r[idx.cdTransp], LARGURA_TRANSP) === cdTransp) {
       linhas.push(r);
     }
   }
@@ -272,7 +291,7 @@ function enviarEmailRomaneio(payload) {
 
   let linhasHtml = "";
   linhas.forEach(function (r, i) {
-    const nrNf = limpar(r[idx.nrNf]);
+    const nrNf = zpad(r[idx.nrNf], LARGURA_NF);
     const chave = limpar(r[idx.chave]);
     if (i === 0) {
       linhasHtml += "<tr>"
@@ -348,7 +367,7 @@ function enviarEmailRomaneio(payload) {
     + "DT_EMISSAO_NF\tNR_ROMANEIO\tDS_TRANSP\tDS_MOTORISTA\tPLACA\tPESO\tVLR_FRETE\tVALOR_NF\tNR_NF\tCHAVENF\n";
 
   linhas.forEach(function (r, i) {
-    const nrNf = limpar(r[idx.nrNf]);
+    const nrNf = zpad(r[idx.nrNf], LARGURA_NF);
     const chave = limpar(r[idx.chave]);
     if (i === 0) {
       corpoTexto += [dtStr, romaneio, transportadora, motorista, placa, fmtNum(peso), fmtMoeda(frete), fmtMoeda(valorCarga), nrNf, chave].join("\t") + "\n";
