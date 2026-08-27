@@ -247,8 +247,9 @@
     font-size:10.5px;font-weight:600;letter-spacing:0.02em;text-transform:uppercase;
     white-space:nowrap;
   }
-  .cte-pill.pending{background:var(--pending-bg);color:var(--text-faint);border:1px solid var(--border);}
+  .cte-pill.pending{background:rgba(224,178,60,0.14);color:#E0B23C;border:1px solid rgba(224,178,60,0.35);}
   .cte-pill.done{background:var(--ok-bg);color:var(--ok);border:1px solid rgba(73,184,136,0.35);}
+  .cte-pill.liberado{background:var(--alert-bg);color:var(--accent);border:1px solid rgba(242,169,59,0.4);}
 
   .send-email-btn{
     background:var(--accent);color:#1A1300;border:none;border-radius:6px;
@@ -433,8 +434,8 @@
     <div class="stats-row">
       <div class="stat"><div class="stat-num" id="statTotal">—</div><div class="stat-label">Romaneios</div></div>
       <div class="stat alert"><div class="stat-num" id="statOcc">—</div><div class="stat-label">Ocorr. 025</div></div>
-      <div class="stat"><div class="stat-num" id="statPend">—</div><div class="stat-label">CTe pendente</div></div>
-      <div class="stat ok"><div class="stat-num" id="statDone">—</div><div class="stat-label">CTe emitido</div></div>
+      <div class="stat"><div class="stat-num" id="statPend">—</div><div class="stat-label">Sem e-mail</div></div>
+      <div class="stat ok"><div class="stat-num" id="statDone">—</div><div class="stat-label">E-mail enviado</div></div>
     </div>
   </div>
 </header>
@@ -447,7 +448,7 @@
   <select id="filialSelect"><option value="">Todas as filiais</option></select>
   <select id="transpSelect"><option value="">Todas as transportadoras</option></select>
   <div class="toggle-chip" id="occToggle"><span class="dot"></span>Somente com ocorrência 025</div>
-  <div class="toggle-chip" id="cteToggle"><span class="dot"></span>Somente CTe pendente</div>
+  <div class="toggle-chip" id="cteToggle"><span class="dot"></span>Somente cargas sem envio de e-mail</div>
   <div class="toggle-chip" id="goncalvesToggle"><span class="dot"></span>Ocultar GONÇALVES &amp; TORTOLA</div>
   <div class="results-count" id="resultsCount"></div>
 </div>
@@ -459,12 +460,12 @@
       <div>Romaneio</div>
       <div>Transportadora</div>
       <div>Motorista / Placa</div>
-      <div>Data</div>
+      <div>Emissão NF</div>
       <div class="num">Peso (kg)</div>
       <div class="num">Frete (R$)</div>
       <div class="num">Vlr. carga (R$)</div>
-      <div class="num">Ocorr.</div>
-      <div>CTe</div>
+      <div class="num">Oc.</div>
+      <div>E-mails</div>
       <div></div>
     </div>
     <div id="tableBody"></div>
@@ -542,7 +543,7 @@ function saudacaoAtual(){
 }
 
 function montarAssunto(r){
-  return `EMISSÃO CTE - CARGA: ${r.romaneio} - TRANSPORTADORA: ${r.transportadora} - DATA: ${dateFmtFull(r.dataEmissao)}`;
+  return `EMISSÃO CTE - CARGA: ${r.romaneio} - TRANSPORTADORA: ${r.transportadora} - DATA EMISSÃO NF: ${dateFmtFull(r.dataEmissao)}`;
 }
 
 function fmtDataHora(iso){
@@ -666,7 +667,9 @@ async function enviarEmail(key){
     });
     const json = await res.json();
     if(json.success){
-      const bodyParam = encodeURIComponent(json.plainBody);
+      // mailto: no Windows/Outlook precisa de \r\n (CRLF) pra respeitar quebras
+      // de linha e linhas em branco - só \n costuma colar tudo numa linha só.
+      const bodyParam = encodeURIComponent(json.plainBody.replace(/\r?\n/g, '\r\n'));
       const subjectParam = encodeURIComponent(json.subject);
       const ccParam = json.cc ? `&cc=${encodeURIComponent(json.cc)}` : '';
       const mailtoBase = `mailto:${encodeURIComponent(json.destinatario)}?subject=${subjectParam}${ccParam}`;
@@ -803,8 +806,8 @@ function applyGoncalvesDefault(){
 function updateStats(list){
   document.getElementById('statTotal').textContent = DATA.length;
   document.getElementById('statOcc').textContent = DATA.filter(r=>r.ocorrencias025.length>0).length;
-  document.getElementById('statPend').textContent = DATA.filter(r=>!r.cte).length;
-  document.getElementById('statDone').textContent = DATA.filter(r=>r.cte).length;
+  document.getElementById('statPend').textContent = DATA.filter(r=>r.emailStatus !== 'enviado').length;
+  document.getElementById('statDone').textContent = DATA.filter(r=>r.emailStatus === 'enviado').length;
   document.getElementById('resultsCount').textContent = list.length + ' de ' + DATA.length + ' romaneios';
 }
 
@@ -812,7 +815,7 @@ function matches(r){
   if(state.filial && r.filial !== state.filial) return false;
   if(state.transp && r.transportadora !== state.transp) return false;
   if(state.onlyOcc && r.ocorrencias025.length === 0) return false;
-  if(state.onlyPending && r.cte) return false;
+  if(state.onlyPending && r.emailStatus === 'enviado') return false;
   if(state.hideGoncalves && isGoncalves(r.transportadora)) return false;
   if(state.search){
     const q = state.search.toLowerCase();
@@ -933,7 +936,11 @@ function render(){
     const key = rowKey(r);
     const isOpen = openSet.has(key);
     const occCount = r.ocorrencias025.length;
-    const ctePendente = !r.cte;
+    const emailPillHtml = r.emailStatus === 'enviado'
+      ? `<span class="cte-pill done">enviado</span>`
+      : r.emailStatus === 'liberado'
+        ? `<span class="cte-pill liberado">liberado</span>`
+        : `<span class="cte-pill pending">pendente</span>`;
     return `
     <div class="romaneio-group ${isOpen?'open':''}" data-key="${key}">
       <div class="row ${isOpen?'expanded':''}" tabindex="0" role="button" aria-expanded="${isOpen}" onclick="toggleRow('${key}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleRow('${key}')}">
@@ -952,7 +959,7 @@ function render(){
         <div class="num">${currFmt(r.frete)}</div>
         <div class="num">${currFmt(r.valorCarga)}</div>
         <div class="num">${occCount>0 ? `<span class="occ-badge">${occCount}</span>` : `<span class="occ-none">—</span>`}</div>
-        <div>${ctePendente ? `<span class="cte-pill pending">pendente</span>` : `<span class="cte-pill done">${escapeHtml(r.cte)}</span>`}</div>
+        <div>${emailPillHtml}</div>
         <div class="toggle-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
       </div>
       <div class="detail-panel" style="${isOpen ? 'max-height:2000px;' : ''}">

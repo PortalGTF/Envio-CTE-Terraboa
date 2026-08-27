@@ -331,8 +331,8 @@ function enviarEmailRomaneio(payload) {
   const saudacao = payload.greeting || "Bom dia";
   const corpoHtml =
     "<div style=\"font-family:Arial,sans-serif;font-size:13px;color:#1a1a1a;line-height:1.5\">"
-    + "<p>" + saudacao + " a todos, Favor enviar o cte nesse mesmo e-mail, não tire ninguém da cópia</p>"
-    + "<p><b>OBS:- FAVOR SEMPRE CONFERIR SE AS NOTAS ANEXA ESTÃO CONFERINDO COM O RELATÓRIO ABAIXO</b></p>"
+    + "<p>" + saudacao + " a todos, Favor enviar o cte nesse mesmo e-mail, não tire ninguém da cópia.</p>"
+    + "<p><b>OBS:- FAVOR SEMPRE CONFERIR SE AS NOTAS ANEXA ESTÃO CONFERINDO COM O RELATÓRIO ABAIXO.</b></p>"
     + "<p>Segue anexo as notas e abaixo a formação para emissão do cte, lembrando que após a emissão devem enviar nesse mesmo e-mail cte para lançamento e posterior pagamento.</p>"
     + "<p>Comprovantes de despesas enviar anexo no e-mail junto com o cte:</p>"
     + ocorrenciasHtml
@@ -340,8 +340,8 @@ function enviarEmailRomaneio(payload) {
     + "</div>";
 
   let corpoTexto =
-    saudacao + " a todos, Favor enviar o cte nesse mesmo e-mail, não tire ninguém da cópia\n\n"
-    + "OBS:- FAVOR SEMPRE CONFERIR SE AS NOTAS ANEXA ESTÃO CONFERINDO COM O RELATÓRIO ABAIXO\n\n"
+    saudacao + " a todos, Favor enviar o cte nesse mesmo e-mail, não tire ninguém da cópia.\n\n"
+    + "OBS:- FAVOR SEMPRE CONFERIR SE AS NOTAS ANEXA ESTÃO CONFERINDO COM O RELATÓRIO ABAIXO.\n\n"
     + "Segue anexo as notas e abaixo a formação para emissão do cte, lembrando que após a emissão devem enviar nesse mesmo e-mail cte para lançamento e posterior pagamento.\n\n"
     + "Comprovantes de despesas enviar anexo no e-mail junto com o cte:\n\n"
     + ocorrenciasTexto
@@ -358,7 +358,7 @@ function enviarEmailRomaneio(payload) {
   });
 
   const assunto = payload.subject ||
-    ("EMISSÃO CTE - CARGA: " + romaneio + " - TRANSPORTADORA: " + transportadora + " - DATA: " + dtStr);
+    ("EMISSÃO CTE - CARGA: " + romaneio + " - TRANSPORTADORA: " + transportadora + " - DATA EMISSÃO NF: " + dtStr);
 
   marcarPreparado(ss, filial, romaneio, cdTransp, destinatario, cc);
 
