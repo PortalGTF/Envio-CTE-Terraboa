@@ -265,6 +265,42 @@
     box-shadow:0 0 0 3px rgba(73,184,136,0.18);
   }
 
+  /* ---------- modal de c\u00f3pia do corpo do e-mail ---------- */
+  .copy-modal-backdrop{
+    display:none;position:fixed;inset:0;background:rgba(6,10,14,0.72);
+    z-index:100;align-items:center;justify-content:center;padding:20px;
+  }
+  .copy-modal-backdrop.open{display:flex;}
+  .copy-modal{
+    background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    max-width:520px;width:100%;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,0.5);
+  }
+  .copy-modal-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
+  .copy-modal-title{font-family:'Oswald',sans-serif;font-size:17px;font-weight:600;color:var(--text);text-transform:uppercase;letter-spacing:0.01em;}
+  .copy-modal-meta{font-size:12.5px;color:var(--text-dim);margin-top:4px;font-family:'JetBrains Mono',monospace;word-break:break-word;}
+  .copy-modal-close{
+    background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-faint);
+    width:28px;height:28px;cursor:pointer;flex:none;font-size:14px;
+  }
+  .copy-modal-close:hover{color:var(--text);border-color:#354758;}
+  .copy-modal-hint{font-size:13px;color:var(--text-dim);line-height:1.5;margin:16px 0;}
+  .copy-modal-btn{
+    width:100%;background:var(--accent);color:#1A1300;border:none;border-radius:7px;
+    padding:13px;font-family:'Inter',sans-serif;font-weight:700;font-size:14px;cursor:pointer;
+    transition:filter .12s ease;
+  }
+  .copy-modal-btn:hover{filter:brightness(1.08);}
+  .copy-modal-status{min-height:20px;margin-top:10px;font-size:12.5px;}
+  .copy-modal-status.ok{color:var(--ok);}
+  .copy-modal-status.fail{color:var(--alert);}
+  .copy-modal-details{margin-top:14px;}
+  .copy-modal-details summary{font-size:12px;color:var(--text-faint);cursor:pointer;}
+  .copy-modal-details textarea{
+    width:100%;height:140px;margin-top:8px;background:var(--bg);color:var(--text-dim);
+    border:1px solid var(--border);border-radius:6px;padding:10px;font-family:'JetBrains Mono',monospace;
+    font-size:11px;resize:vertical;
+  }
+
   /* ---------- expanded panel ---------- */
   .detail-panel{
     max-height:0;overflow:hidden;
@@ -420,6 +456,26 @@
   <footer>Fonte: export do BI · frete e valor de carga considerados uma única vez por romaneio · ocorrências filtradas para código 025 (complemento de frete / diária)</footer>
 </main>
 
+<div class="copy-modal-backdrop" id="copyModal">
+  <div class="copy-modal">
+    <div class="copy-modal-header">
+      <div>
+        <div class="copy-modal-title">Outlook aberto — falta colar o corpo</div>
+        <div class="copy-modal-meta" id="copyModalDest"></div>
+        <div class="copy-modal-meta" id="copyModalSubject" style="color:var(--text-faint);"></div>
+      </div>
+      <button class="copy-modal-close" onclick="fecharModalCopia()" aria-label="Fechar">✕</button>
+    </div>
+    <p class="copy-modal-hint" id="copyModalHint">Clique no botão abaixo pra copiar o texto + tabela formatados, depois clique dentro do corpo do e-mail que abriu no Outlook e cole com <b>Ctrl+V</b>.</p>
+    <button class="copy-modal-btn" onclick="copiarCorpoModal()">📋 Copiar corpo do e-mail</button>
+    <div class="copy-modal-status" id="copyModalStatus"></div>
+    <details class="copy-modal-details">
+      <summary>Ver / copiar manualmente o texto</summary>
+      <textarea id="copyModalTextarea" readonly onclick="this.select()"></textarea>
+    </details>
+  </div>
+</div>
+
 <script>
 /* =======================================================================
    CONEXAO COM A PLANILHA (Google Sheets)
@@ -511,6 +567,38 @@ async function copiarParaAreaTransferencia(html, texto){
   }
 }
 
+function abrirModalCopia(json, motivoTamanho){
+  const modal = document.getElementById('copyModal');
+  document.getElementById('copyModalDest').textContent = json.destinatario + (json.cc ? ' · cc: ' + json.cc : '');
+  document.getElementById('copyModalSubject').textContent = json.subject;
+  document.getElementById('copyModalTextarea').value = json.plainBody;
+  document.getElementById('copyModalStatus').textContent = '';
+  document.getElementById('copyModalHint').textContent = motivoTamanho
+    ? 'Essa carga tem muitas notas e o corpo ficou grande demais pra preencher sozinho no Outlook. Clique no botão abaixo pra copiar tudo, depois clique dentro do corpo do e-mail que já abriu e cole com Ctrl+V.'
+    : 'Clique no botão abaixo pra copiar o texto + tabela formatados, depois clique dentro do corpo do e-mail que abriu no Outlook e cole com Ctrl+V.';
+  modal.dataset.html = json.htmlBody;
+  modal.dataset.plain = json.plainBody;
+  modal.classList.add('open');
+}
+
+function fecharModalCopia(){
+  document.getElementById('copyModal').classList.remove('open');
+}
+
+async function copiarCorpoModal(){
+  const modal = document.getElementById('copyModal');
+  const status = document.getElementById('copyModalStatus');
+  const ok = await copiarParaAreaTransferencia(modal.dataset.html, modal.dataset.plain);
+  status.textContent = ok
+    ? '✓ Copiado! Agora clique no corpo do e-mail no Outlook e cole com Ctrl+V.'
+    : 'Não consegui copiar automaticamente — selecione o texto abaixo manualmente (Ctrl+A, Ctrl+C).';
+  status.className = ok ? 'copy-modal-status ok' : 'copy-modal-status fail';
+  if(!ok){
+    document.getElementById('copyModalTextarea').focus();
+    document.getElementById('copyModalTextarea').select();
+  }
+}
+
 async function enviarEmail(key){
   const r = DATA.find(x => rowKey(x) === key);
   if(!r) return;
@@ -524,7 +612,7 @@ async function enviarEmail(key){
     const ok = confirm(`Este romaneio já teve o e-mail preparado em ${fmtDataHora(r.dataEnvioEmail)}.\n\nPreparar de novo mesmo assim?`);
     if(!ok) return;
   } else {
-    const ok = confirm(`Preparar e-mail de emissão de CTe para a transportadora ${r.transportadora} (romaneio ${r.romaneio})?\n\nVai abrir o Outlook do seu computador com destinatário e assunto prontos, e o corpo do e-mail copiado pra você colar (Ctrl+V). Depois é só anexar as notas/canhotos e enviar.`);
+    const ok = confirm(`Preparar e-mail de emissão de CTe para a transportadora ${r.transportadora} (romaneio ${r.romaneio})?\n\nVai abrir o Outlook do seu computador já preenchido (destinatário, cópia, assunto e corpo). Depois é só anexar as notas/canhotos e enviar.`);
     if(!ok) return;
   }
 
@@ -545,13 +633,18 @@ async function enviarEmail(key){
     });
     const json = await res.json();
     if(json.success){
-      const copiou = await copiarParaAreaTransferencia(json.htmlBody, json.plainBody);
+      const bodyParam = encodeURIComponent(json.plainBody);
+      const subjectParam = encodeURIComponent(json.subject);
+      const ccParam = json.cc ? `&cc=${encodeURIComponent(json.cc)}` : '';
+      const mailtoBase = `mailto:${encodeURIComponent(json.destinatario)}?subject=${subjectParam}${ccParam}`;
 
-      const params = new URLSearchParams();
-      params.set('subject', json.subject);
-      if(json.cc) params.set('cc', json.cc);
-      const mailto = `mailto:${encodeURIComponent(json.destinatario)}?${params.toString()}`;
-      window.location.href = mailto;
+      const LIMITE_SEGURO = 1800; // tamanho aproximado que a maioria dos clientes de e-mail aceita no link mailto:
+      if(bodyParam.length <= LIMITE_SEGURO){
+        window.location.href = `${mailtoBase}&body=${bodyParam}`;
+      } else {
+        window.location.href = mailtoBase;
+        abrirModalCopia(json, true);
+      }
 
       r.emailEnviado = true;
       r.dataEnvioEmail = new Date().toISOString();
@@ -559,12 +652,6 @@ async function enviarEmail(key){
       requestAnimationFrame(()=>{
         if(!openSet.has(key)) toggleRow(key);
       });
-
-      setTimeout(()=>{
-        alert(copiou
-          ? 'Outlook aberto com destinatário e assunto prontos.\n\nO corpo do e-mail já foi copiado — clique dentro do corpo do e-mail e cole com Ctrl+V. Depois é só anexar as notas e enviar.'
-          : 'Outlook aberto, mas não consegui copiar o corpo automaticamente (permissão do navegador). Copie manualmente os dados do romaneio antes de enviar.');
-      }, 400);
     } else {
       alert('Não consegui preparar o e-mail:\n' + json.error);
       render();
