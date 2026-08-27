@@ -260,8 +260,9 @@
   .send-email-btn.sent{background:var(--ok-bg);color:var(--ok);border:1px solid rgba(73,184,136,0.4);}
   .send-email-btn.sent:hover{filter:none;}
   .email-sent-dot{
-    display:inline-block;width:7px;height:7px;border-radius:50%;
-    background:var(--ok);margin-left:6px;vertical-align:middle;
+    display:inline-block;width:8px;height:8px;border-radius:50%;
+    background:var(--ok);vertical-align:middle;
+    box-shadow:0 0 0 3px rgba(73,184,136,0.18);
   }
 
   /* ---------- expanded panel ---------- */
@@ -725,7 +726,7 @@ function render(){
     return `
     <div class="romaneio-group ${isOpen?'open':''}" data-key="${key}">
       <div class="row ${isOpen?'expanded':''}" tabindex="0" role="button" aria-expanded="${isOpen}" onclick="toggleRow('${key}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleRow('${key}')}">
-        <div></div>
+        <div style="text-align:center;">${r.emailEnviado ? `<span class="email-sent-dot" title="E-mail preparado em ${fmtDataHora(r.dataEnvioEmail)}"></span>` : ''}</div>
         <div><span class="romaneio-tag"><span class="filial">${r.filial}</span>${escapeHtml(r.romaneio)}</span></div>
         <div>
           <span class="transp-name">${escapeHtml(r.transportadora)}</span>
@@ -740,7 +741,7 @@ function render(){
         <div class="num">${currFmt(r.frete)}</div>
         <div class="num">${currFmt(r.valorCarga)}</div>
         <div class="num">${occCount>0 ? `<span class="occ-badge">${occCount}</span>` : `<span class="occ-none">—</span>`}</div>
-        <div>${ctePendente ? `<span class="cte-pill pending">pendente</span>` : `<span class="cte-pill done">${escapeHtml(r.cte)}</span>`}${r.emailEnviado ? `<span class="email-sent-dot" title="E-mail preparado em ${fmtDataHora(r.dataEnvioEmail)}"></span>` : ''}</div>
+        <div>${ctePendente ? `<span class="cte-pill pending">pendente</span>` : `<span class="cte-pill done">${escapeHtml(r.cte)}</span>`}</div>
         <div class="toggle-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
       </div>
       <div class="detail-panel" style="${isOpen ? 'max-height:2000px;' : ''}">
