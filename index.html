@@ -259,11 +259,31 @@
   .send-email-btn:disabled{opacity:.6;cursor:default;}
   .send-email-btn.sent{background:var(--ok-bg);color:var(--ok);border:1px solid rgba(73,184,136,0.4);}
   .send-email-btn.sent:hover{filter:none;}
+  .send-email-btn.secondary{
+    background:var(--panel-alt);color:var(--text-dim);border:1px solid var(--border);
+    font-weight:500;padding:8px 13px;font-size:12.5px;
+  }
+  .send-email-btn.secondary:hover{border-color:var(--accent);color:var(--text);filter:none;}
+  .send-block{margin-bottom:4px;}
+  .send-block.locked{
+    background:var(--ok-bg);border:1px solid rgba(73,184,136,0.35);border-radius:8px;padding:12px 14px;
+  }
+  .send-locked-label{color:var(--ok);font-size:13px;font-weight:600;margin-bottom:10px;}
+  .send-block-actions{display:flex;gap:8px;flex-wrap:wrap;}
+  .liberado-flag{
+    display:inline-flex;align-items:center;gap:6px;
+    background:var(--alert-bg);color:var(--accent);border:1px solid rgba(242,169,59,0.4);
+    padding:7px 12px;border-radius:6px;font-size:12.5px;font-weight:600;margin-bottom:10px;
+  }
+  .status-dot.erro{background:var(--accent);box-shadow:0 0 0 3px rgba(242,169,59,0.2);}
+  .status-dot.liberado{background:var(--accent);box-shadow:0 0 0 3px rgba(242,169,59,0.2);}
   .email-sent-dot{
     display:inline-block;width:8px;height:8px;border-radius:50%;
     background:var(--ok);vertical-align:middle;
     box-shadow:0 0 0 3px rgba(73,184,136,0.18);
   }
+  .email-sent-dot.liberado{background:var(--accent);box-shadow:0 0 0 3px rgba(242,169,59,0.2);}
+  .email-sent-dot.erro{background:#E0B23C;box-shadow:0 0 0 3px rgba(224,178,60,0.2);}
 
   /* ---------- modal de c\u00f3pia do corpo do e-mail ---------- */
   .copy-modal-backdrop{
@@ -532,6 +552,19 @@ function fmtDataHora(iso){
   }catch(e){ return ''; }
 }
 
+function statusDotHtml(r){
+  if(r._erro){
+    return `<span class="email-sent-dot erro" title="Última tentativa falhou: ${escapeHtml(r._erroMsg||'erro desconhecido')}"></span>`;
+  }
+  if(r.emailStatus === 'enviado'){
+    return `<span class="email-sent-dot" title="E-mail enviado em ${fmtDataHora(r.dataEnvioEmail)} — travado"></span>`;
+  }
+  if(r.emailStatus === 'liberado'){
+    return `<span class="email-sent-dot liberado" title="Liberado para reenvio em ${fmtDataHora(r.dataEnvioEmail)}"></span>`;
+  }
+  return '';
+}
+
 async function copiarParaAreaTransferencia(html, texto){
   try{
     if(navigator.clipboard && window.ClipboardItem){
@@ -608,13 +641,13 @@ async function enviarEmail(key){
     return;
   }
 
-  if(r.emailEnviado){
-    const ok = confirm(`Este romaneio já teve o e-mail preparado em ${fmtDataHora(r.dataEnvioEmail)}.\n\nPreparar de novo mesmo assim?`);
-    if(!ok) return;
-  } else {
-    const ok = confirm(`Preparar e-mail de emissão de CTe para a transportadora ${r.transportadora} (romaneio ${r.romaneio})?\n\nVai abrir o Outlook do seu computador já preenchido (destinatário, cópia, assunto e corpo). Depois é só anexar as notas/canhotos e enviar.`);
-    if(!ok) return;
+  if(r.emailStatus === 'enviado'){
+    alert('Esse romaneio já foi enviado e está travado.\n\nPeça liberação (botão "Solicitar liberação") ou use a senha se você tiver uma.');
+    return;
   }
+
+  const ok = confirm(`Preparar e-mail de emissão de CTe para a transportadora ${r.transportadora} (romaneio ${r.romaneio})?\n\nVai abrir o Outlook do seu computador já preenchido (destinatário, cópia, assunto e corpo). Depois é só anexar as notas/canhotos e enviar.`);
+  if(!ok) return;
 
   const btn = document.querySelector(`[data-send-btn="${CSS.escape(key)}"]`);
   if(btn){ btn.disabled = true; btn.textContent = 'Preparando…'; }
@@ -646,19 +679,91 @@ async function enviarEmail(key){
         abrirModalCopia(json, true);
       }
 
-      r.emailEnviado = true;
+      r.emailStatus = 'enviado';
       r.dataEnvioEmail = new Date().toISOString();
+      r._erro = false;
       render();
       requestAnimationFrame(()=>{
         if(!openSet.has(key)) toggleRow(key);
       });
     } else {
+      r._erro = true;
+      r._erroMsg = json.error;
       alert('Não consegui preparar o e-mail:\n' + json.error);
       render();
     }
   }catch(err){
+    r._erro = true;
+    r._erroMsg = err.message;
     alert('Erro de conexão ao tentar preparar o e-mail:\n' + err.message);
     render();
+  }
+}
+
+async function solicitarLiberacaoRomaneio(key){
+  const r = DATA.find(x => rowKey(x) === key);
+  if(!r) return;
+  if(!SCRIPT_URL){ alert('Configure o SCRIPT_URL no código.'); return; }
+
+  const nome = prompt('Seu nome (vai junto no e-mail de pedido de liberação):', '');
+  if(nome === null) return;
+  const ok = confirm(`Enviar pedido de liberação do romaneio ${r.romaneio} (${r.transportadora}) para a equipe responsável?`);
+  if(!ok) return;
+
+  try{
+    const res = await fetch(SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'solicitarLiberacao',
+        filial: r.filial,
+        romaneio: r.romaneio,
+        cdTransp: r.cdTransp,
+        transportadora: r.transportadora,
+        nomeSolicitante: nome || 'Alguém da equipe'
+      })
+    });
+    const json = await res.json();
+    if(json.success){
+      alert('Pedido de liberação enviado! Assim que for liberado, esse romaneio ganha uma plaquinha de atenção e pode ser reenviado.');
+    } else {
+      alert('Não consegui enviar o pedido:\n' + json.error);
+    }
+  }catch(err){
+    alert('Erro de conexão:\n' + err.message);
+  }
+}
+
+async function liberarComSenha(key){
+  const r = DATA.find(x => rowKey(x) === key);
+  if(!r) return;
+  if(!SCRIPT_URL){ alert('Configure o SCRIPT_URL no código.'); return; }
+
+  const senha = prompt('Senha de liberação:');
+  if(senha === null) return;
+
+  try{
+    const res = await fetch(SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'liberarRomaneio',
+        filial: r.filial,
+        romaneio: r.romaneio,
+        cdTransp: r.cdTransp,
+        senha: senha
+      })
+    });
+    const json = await res.json();
+    if(json.success){
+      r.emailStatus = 'liberado';
+      render();
+      requestAnimationFrame(()=>{
+        if(!openSet.has(key)) toggleRow(key);
+      });
+    } else {
+      alert(json.error || 'Senha incorreta.');
+    }
+  }catch(err){
+    alert('Erro de conexão:\n' + err.message);
   }
 }
 
@@ -770,9 +875,28 @@ function renderDetail(r){
   `).join('') : `<div class="no-occ">Nenhuma ocorrência 025 (complemento/diária) neste romaneio.</div>`;
 
   const key = rowKey(r);
-  const sendBtnHtml = r.emailEnviado
-    ? `<button class="send-email-btn sent" data-send-btn="${key}" onclick="enviarEmail('${key}')">✓ E-mail preparado em ${fmtDataHora(r.dataEnvioEmail)} · preparar de novo</button>`
-    : `<button class="send-email-btn" data-send-btn="${key}" onclick="enviarEmail('${key}')">Preparar e-mail no Outlook</button>`;
+  let sendBtnHtml;
+  if(r.emailStatus === 'enviado'){
+    sendBtnHtml = `
+      <div class="send-block locked">
+        <div class="send-locked-label">🔒 E-mail enviado em ${fmtDataHora(r.dataEnvioEmail)} — travado pra reenvio</div>
+        <div class="send-block-actions">
+          <button class="send-email-btn secondary" onclick="solicitarLiberacaoRomaneio('${key}')">Solicitar liberação por e-mail</button>
+          <button class="send-email-btn secondary" onclick="liberarComSenha('${key}')">Já tenho a senha</button>
+        </div>
+      </div>`;
+  } else if(r.emailStatus === 'liberado'){
+    sendBtnHtml = `
+      <div class="send-block">
+        <div class="liberado-flag">⚠ Liberado para reenvio dessa carga</div>
+        <button class="send-email-btn" data-send-btn="${key}" onclick="enviarEmail('${key}')">Preparar e-mail no Outlook</button>
+      </div>`;
+  } else {
+    sendBtnHtml = `
+      <div class="send-block">
+        <button class="send-email-btn" data-send-btn="${key}" onclick="enviarEmail('${key}')">Preparar e-mail no Outlook</button>
+      </div>`;
+  }
 
   return `
     <div class="detail-inner">
@@ -813,7 +937,7 @@ function render(){
     return `
     <div class="romaneio-group ${isOpen?'open':''}" data-key="${key}">
       <div class="row ${isOpen?'expanded':''}" tabindex="0" role="button" aria-expanded="${isOpen}" onclick="toggleRow('${key}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleRow('${key}')}">
-        <div style="text-align:center;">${r.emailEnviado ? `<span class="email-sent-dot" title="E-mail preparado em ${fmtDataHora(r.dataEnvioEmail)}"></span>` : ''}</div>
+        <div style="text-align:center;">${statusDotHtml(r)}</div>
         <div><span class="romaneio-tag"><span class="filial">${r.filial}</span>${escapeHtml(r.romaneio)}</span></div>
         <div>
           <span class="transp-name">${escapeHtml(r.transportadora)}</span>

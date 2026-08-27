@@ -135,13 +135,24 @@ function doGet(e) {
 
   const resultado = ordem.map(k => romaneios[k]);
 
-  // Marca quais romaneios já tiveram e-mail enviado (aba "Envios")
-  const envios = lerEnvios(ss);
+  // Marca o status de cada romaneio a partir da aba "Envios":
+  // - "nunca": nunca foi preparado
+  // - "enviado": preparado e travado (bolinha verde)
+  // - "liberado": foi liberado por senha depois de já ter sido enviado (plaquinha de atenção, pode reenviar)
+  const eventos = lerUltimoEvento(ss);
   resultado.forEach(function (r) {
     const chave = r.filial + "|" + r.romaneio + "|" + r.cdTransp;
-    const info = envios[chave];
-    r.emailEnviado = !!info;
-    r.dataEnvioEmail = info ? info.data : null;
+    const info = eventos[chave];
+    if (!info) {
+      r.emailStatus = "nunca";
+      r.dataEnvioEmail = null;
+    } else if (info.tipo === "liberacao") {
+      r.emailStatus = "liberado";
+      r.dataEnvioEmail = info.data;
+    } else {
+      r.emailStatus = "enviado";
+      r.dataEnvioEmail = info.data;
+    }
   });
 
   return ContentService
@@ -149,25 +160,37 @@ function doGet(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function lerEnvios(ss) {
+/**
+ * Lê a aba "Envios" e devolve, para cada romaneio (chave), o evento mais
+ * recente (seja um preparo de e-mail ou uma liberação pra reenvio).
+ */
+function lerUltimoEvento(ss) {
   const aba = ss.getSheetByName(ABA_ENVIOS);
   const mapa = {};
   if (!aba) return mapa;
   const valores = aba.getDataRange().getValues();
+  // colunas: CHAVE, FILIAL, ROMANEIO, CD_TRANSP, TIPO, DATA, DESTINATARIO, CC, OBS
   for (let i = 1; i < valores.length; i++) {
-    const chave = valores[i][0];
-    const data = valores[i][4];
+    const linha = valores[i];
+    const chave = linha[0];
     if (!chave) continue;
-    mapa[chave] = {
-      data: data instanceof Date ? data.toISOString() : String(data || "")
-    };
+    const tipo = linha[4] || "preparo";
+    const data = linha[5];
+    const dataIso = data instanceof Date ? data.toISOString() : String(data || "");
+    const atual = mapa[chave];
+    if (!atual || dataIso > atual.data) {
+      mapa[chave] = { tipo: tipo, data: dataIso };
+    }
   }
   return mapa;
 }
 
 /**
- * Recebe requisições POST da página (botão "Enviar e-mail").
- * Corpo esperado (JSON): { action: "enviarEmail", filial, romaneio, cdTransp, subject, greeting }
+ * Recebe requisições POST da página.
+ * Ações suportadas:
+ * - enviarEmail: { action, filial, romaneio, cdTransp, subject, greeting }
+ * - solicitarLiberacao: { action, filial, romaneio, cdTransp, nomeSolicitante }
+ * - liberarRomaneio: { action, filial, romaneio, cdTransp, senha }
  */
 function doPost(e) {
   let payload;
@@ -177,9 +200,9 @@ function doPost(e) {
     return jsonResponse({ success: false, error: "Requisição inválida." });
   }
 
-  if (payload.action === "enviarEmail") {
-    return enviarEmailRomaneio(payload);
-  }
+  if (payload.action === "enviarEmail") return enviarEmailRomaneio(payload);
+  if (payload.action === "solicitarLiberacao") return solicitarLiberacao(payload);
+  if (payload.action === "liberarRomaneio") return liberarRomaneio(payload);
 
   return jsonResponse({ success: false, error: "Ação desconhecida: " + payload.action });
 }
@@ -283,7 +306,7 @@ function enviarEmailRomaneio(payload) {
     + "</table>";
 
   // Ocorrências 025 (complemento de frete / diária) desse romaneio - aparecem
-  // acima da tabela, uma linha por ocorrência: "Ocorrência: 000 - descrição VALOR: X,XX"
+  // acima da tabela, uma linha por ocorrência: "➢ Ocorrência: 000 - descrição VALOR: X,XX"
   const linhasOcorrenciaHtml = [];
   const linhasOcorrenciaTexto = [];
   linhas.forEach(function (r) {
@@ -291,13 +314,15 @@ function enviarEmailRomaneio(payload) {
     const mot = limpar(r[idx.motOcor]);
     if (descrSub.indexOf("025") === 0 || mot.indexOf("025") === 0) {
       const nrOc = limpar(r[idx.nrOcorrencia]);
-      const desc = limpar(r[idx.ocorrencia]);
+      // remove um "VALOR: ..." que às vezes já vem dentro do próprio texto da ocorrência,
+      // pra não duplicar quando a gente adiciona o nosso VALOR formatado no final
+      const desc = limpar(r[idx.ocorrencia]).replace(/\s*VALOR\s*:?\s*[\d.,]+\s*$/i, "").trim();
       const valorOc = parseNumeroBR(r[idx.ocComplemento]);
       let linha = "Ocorrência: " + nrOc;
       if (desc) linha += " - " + desc;
       if (valorOc != null) linha += " VALOR: " + valorOc.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      linhasOcorrenciaHtml.push("<p style='margin:2px 0'>" + linha + "</p>");
-      linhasOcorrenciaTexto.push(linha);
+      linhasOcorrenciaHtml.push("<p style='margin:2px 0'>➢ " + linha + "</p>");
+      linhasOcorrenciaTexto.push("➢ " + linha);
     }
   });
   const ocorrenciasHtml = linhasOcorrenciaHtml.join("");
@@ -309,7 +334,7 @@ function enviarEmailRomaneio(payload) {
     + "<p>" + saudacao + " a todos, Favor enviar o cte nesse mesmo e-mail, não tire ninguém da cópia</p>"
     + "<p><b>OBS:- FAVOR SEMPRE CONFERIR SE AS NOTAS ANEXA ESTÃO CONFERINDO COM O RELATÓRIO ABAIXO</b></p>"
     + "<p>Segue anexo as notas e abaixo a formação para emissão do cte, lembrando que após a emissão devem enviar nesse mesmo e-mail cte para lançamento e posterior pagamento.</p>"
-    + "<p>Comprovantes de despesas enviar anexo no e-mail junto com o cte</p>"
+    + "<p>Comprovantes de despesas enviar anexo no e-mail junto com o cte:</p>"
     + ocorrenciasHtml
     + tabela
     + "</div>";
@@ -318,7 +343,7 @@ function enviarEmailRomaneio(payload) {
     saudacao + " a todos, Favor enviar o cte nesse mesmo e-mail, não tire ninguém da cópia\n\n"
     + "OBS:- FAVOR SEMPRE CONFERIR SE AS NOTAS ANEXA ESTÃO CONFERINDO COM O RELATÓRIO ABAIXO\n\n"
     + "Segue anexo as notas e abaixo a formação para emissão do cte, lembrando que após a emissão devem enviar nesse mesmo e-mail cte para lançamento e posterior pagamento.\n\n"
-    + "Comprovantes de despesas enviar anexo no e-mail junto com o cte\n\n"
+    + "Comprovantes de despesas enviar anexo no e-mail junto com o cte:\n\n"
     + ocorrenciasTexto
     + "DT_EMISSAO_NF\tNR_ROMANEIO\tDS_TRANSP\tDS_MOTORISTA\tPLACA\tPESO\tVLR_FRETE\tVALOR_NF\tNR_NF\tCHAVENF\n";
 
@@ -348,13 +373,106 @@ function enviarEmailRomaneio(payload) {
 }
 
 function marcarPreparado(ss, filial, romaneio, cdTransp, destinatario, cc) {
+  registrarEvento(ss, filial, romaneio, cdTransp, "preparo", destinatario, cc, "");
+}
+
+/**
+ * Garante que a aba "Envios" existe com o cabeçalho certo (colunas novas
+ * inclusas), mesmo se ela já existia no formato antigo.
+ */
+function getAbaEnvios(ss) {
   let aba = ss.getSheetByName(ABA_ENVIOS);
   if (!aba) {
     aba = ss.insertSheet(ABA_ENVIOS);
-    aba.appendRow(["CHAVE", "FILIAL", "ROMANEIO", "CD_TRANSP", "DATA_PREPARO", "DESTINATARIO", "CC"]);
+    aba.appendRow(["CHAVE", "FILIAL", "ROMANEIO", "CD_TRANSP", "TIPO", "DATA", "DESTINATARIO", "CC", "OBS"]);
+  } else {
+    const cab = aba.getRange(1, 1, 1, Math.max(aba.getLastColumn(), 9)).getValues()[0];
+    if (cab[4] !== "TIPO") {
+      // Planilha ainda no formato antigo (sem coluna TIPO) - insere e ajusta
+      aba.insertColumnBefore(5);
+      aba.getRange(1, 5).setValue("TIPO");
+      const nLinhas = aba.getLastRow();
+      if (nLinhas > 1) {
+        aba.getRange(2, 5, nLinhas - 1, 1).setValue("preparo");
+      }
+    }
   }
+  return aba;
+}
+
+function registrarEvento(ss, filial, romaneio, cdTransp, tipo, destinatario, cc, obs) {
+  const aba = getAbaEnvios(ss);
   const chave = filial + "|" + romaneio + "|" + cdTransp;
-  aba.appendRow([chave, filial, romaneio, cdTransp, new Date(), destinatario, cc]);
+  aba.appendRow([chave, filial, romaneio, cdTransp, tipo, new Date(), destinatario || "", cc || "", obs || ""]);
+}
+
+/**
+ * E-mails autorizados a liberar um romaneio pra reenvio (recebem o pedido
+ * de liberação e são os únicos "esperados" a saber a senha).
+ */
+const EMAILS_LIBERACAO = [
+  "diego.lopes@gtf.com.br",
+  "geovana.canevarolli1@gtf.com.br",
+  "raphael.sauer@gtf.com.br",
+  "gabrieli.lima@gtf.com.br"
+];
+
+/**
+ * Senha compartilhada pra liberar reenvio de um romaneio já enviado.
+ * TROQUE ESSE VALOR e não compartilhe o código-fonte com quem não deveria ter a senha.
+ */
+const SENHA_LIBERACAO = "gtf2026";
+
+/**
+ * Manda um e-mail pros responsáveis pedindo pra liberarem um romaneio
+ * específico pra reenvio dentro da plataforma.
+ */
+function solicitarLiberacao(payload) {
+  const filial = String(payload.filial || "");
+  const romaneio = String(payload.romaneio || "");
+  const cdTransp = String(payload.cdTransp || "");
+  const transportadora = limpar(payload.transportadora || "");
+  const nome = limpar(payload.nomeSolicitante || "Alguém da equipe");
+
+  const assunto = "Liberação de reenvio - Romaneio " + romaneio;
+  const corpo =
+    "<p>" + nome + " solicitou a liberação do romaneio <b>" + romaneio + "</b>"
+    + (transportadora ? " (" + transportadora + ")" : "") + " para reenvio de e-mail dentro da plataforma.</p>"
+    + "<p>Esse romaneio já tinha sido enviado antes e está travado. Se estiver de acordo, entre na plataforma e libere com a senha.</p>";
+
+  try {
+    GmailApp.sendEmail(EMAILS_LIBERACAO.join(","), assunto, "", {
+      htmlBody: corpo,
+      name: "Envio de Cargas - Criação de CTe"
+    });
+  } catch (err) {
+    return jsonResponse({ success: false, error: "Erro ao enviar o pedido de liberação: " + err });
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  registrarEvento(ss, filial, romaneio, cdTransp, "pedido_liberacao", EMAILS_LIBERACAO.join(","), "", "Solicitado por: " + nome);
+
+  return jsonResponse({ success: true });
+}
+
+/**
+ * Confere a senha e, se estiver certa, libera o romaneio pra reenvio
+ * (o próximo "enviarEmail" vai passar a funcionar de novo).
+ */
+function liberarRomaneio(payload) {
+  const senha = String(payload.senha || "");
+  if (senha !== SENHA_LIBERACAO) {
+    return jsonResponse({ success: false, error: "Senha incorreta." });
+  }
+
+  const filial = String(payload.filial || "");
+  const romaneio = String(payload.romaneio || "");
+  const cdTransp = String(payload.cdTransp || "");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  registrarEvento(ss, filial, romaneio, cdTransp, "liberacao", "", "", "Liberado manualmente na plataforma");
+
+  return jsonResponse({ success: true });
 }
 
 function limpar(v) {
