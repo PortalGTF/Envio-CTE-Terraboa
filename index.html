@@ -732,7 +732,7 @@ async function solicitarLiberacaoRomaneio(key){
 
   const nome = prompt('Seu nome (vai junto no e-mail de pedido de liberação):', '');
   if(nome === null) return;
-  const ok = confirm(`Enviar pedido de liberação do romaneio ${r.romaneio} (${r.transportadora}) para a equipe responsável?`);
+  const ok = confirm(`Preparar e-mail de pedido de liberação do romaneio ${r.romaneio} (${r.transportadora})?\n\nVai abrir o Outlook do seu computador já preenchido, direcionado pra equipe responsável.`);
   if(!ok) return;
 
   try{
@@ -749,9 +749,12 @@ async function solicitarLiberacaoRomaneio(key){
     });
     const json = await res.json();
     if(json.success){
-      alert('Pedido de liberação enviado! Assim que for liberado, esse romaneio ganha uma plaquinha de atenção e pode ser reenviado.');
+      const bodyParam = encodeURIComponent(json.plainBody.replace(/\r?\n/g, '\r\n'));
+      const subjectParam = encodeURIComponent(json.subject);
+      const mailto = `mailto:${encodeURIComponent(json.destinatario)}?subject=${subjectParam}&body=${bodyParam}`;
+      window.location.href = mailto;
     } else {
-      alert('Não consegui enviar o pedido:\n' + json.error);
+      alert('Não consegui preparar o pedido:\n' + json.error);
     }
   }catch(err){
     alert('Erro de conexão:\n' + err.message);
