@@ -559,8 +559,8 @@ const dateFmtFull = (iso) => {
 
 function saudacaoAtual(){
   const h = new Date().getHours();
-  if(h < 12) return 'Bom dia';
-  if(h < 18) return 'Boa tarde';
+  if(h >= 6 && h < 12) return 'Bom dia';
+  if(h >= 12 && h < 18) return 'Boa tarde';
   return 'Boa noite';
 }
 
@@ -738,7 +738,8 @@ async function solicitarLiberacaoRomaneio(key){
         filial: r.filial,
         romaneio: r.romaneio,
         cdTransp: r.cdTransp,
-        transportadora: r.transportadora
+        transportadora: r.transportadora,
+        greeting: saudacaoAtual()
       })
     });
     const json = await res.json();

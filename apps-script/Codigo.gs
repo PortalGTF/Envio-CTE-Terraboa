@@ -451,22 +451,24 @@ function solicitarLiberacao(payload) {
   const romaneio = String(payload.romaneio || "");
   const cdTransp = String(payload.cdTransp || "");
   const transportadora = limpar(payload.transportadora || "");
-  const nome = limpar(payload.nomeSolicitante || "Alguém da equipe");
+  const saudacao = payload.greeting || "Bom dia";
 
-  const assunto = "Liberação de reenvio - Romaneio " + romaneio;
+  const assunto = "LIBERAÇÃO DE REENVIO DE CARGA PARA CRIAÇÃO DE CTE - ROMANEIO " + romaneio + " - TRANSPORTADOR: " + transportadora;
   const corpoTexto =
-    nome + " solicitou a liberação do romaneio " + romaneio
-    + (transportadora ? " (" + transportadora + ")" : "") + " para reenvio de e-mail dentro da plataforma.\n\n"
-    + "Esse romaneio já tinha sido enviado antes e está travado. Se estiver de acordo, entrem na plataforma e liberem com a senha.";
+    saudacao + ", tudo bem?\n\n"
+    + "Solicito, por gentileza, a liberação do romaneio " + romaneio
+    + (transportadora ? " (" + transportadora + ")" : "") + " para reenvio de e-mail dentro da plataforma de envio de cargas.\n\n"
+    + "Esse romaneio já foi enviado anteriormente e está travado por segurança. Se estiver tudo certo, peço que acessem a plataforma e liberem com a senha assim que possível.\n\n"
+    + "Desde já agradeço a atenção!";
 
   // Não envia pelo Gmail do script - devolve pronto pro navegador abrir o
   // Outlook da própria pessoa (mailto:), igual o fluxo de enviar e-mail.
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  registrarEvento(ss, filial, romaneio, cdTransp, "pedido_liberacao", EMAILS_LIBERACAO.join(","), "", "Solicitado por: " + nome);
+  registrarEvento(ss, filial, romaneio, cdTransp, "pedido_liberacao", EMAILS_LIBERACAO.join(";"), "", "Solicitado por: alguém da equipe");
 
   return jsonResponse({
     success: true,
-    destinatario: EMAILS_LIBERACAO.join(","),
+    destinatario: EMAILS_LIBERACAO.join(";"),
     subject: assunto,
     plainBody: corpoTexto
   });
