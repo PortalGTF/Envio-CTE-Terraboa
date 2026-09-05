@@ -730,11 +730,6 @@ async function solicitarLiberacaoRomaneio(key){
   if(!r) return;
   if(!SCRIPT_URL){ alert('Configure o SCRIPT_URL no código.'); return; }
 
-  const nome = prompt('Seu nome (vai junto no e-mail de pedido de liberação):', '');
-  if(nome === null) return;
-  const ok = confirm(`Preparar e-mail de pedido de liberação do romaneio ${r.romaneio} (${r.transportadora})?\n\nVai abrir o Outlook do seu computador já preenchido, direcionado pra equipe responsável.`);
-  if(!ok) return;
-
   try{
     const res = await fetch(SCRIPT_URL, {
       method: 'POST',
@@ -743,8 +738,7 @@ async function solicitarLiberacaoRomaneio(key){
         filial: r.filial,
         romaneio: r.romaneio,
         cdTransp: r.cdTransp,
-        transportadora: r.transportadora,
-        nomeSolicitante: nome || 'Alguém da equipe'
+        transportadora: r.transportadora
       })
     });
     const json = await res.json();
